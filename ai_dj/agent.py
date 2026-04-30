@@ -4,8 +4,8 @@ import json
 
 from anthropic import Anthropic
 
-from config import CLAUDE_MODEL, SYSTEM_PROMPT
-from spotify_controller import SpotifyController
+from packages.ai_dj.config import CLAUDE_MODEL, SYSTEM_PROMPT
+from packages.ai_dj.spotify_controller import SpotifyController
 
 TOOLS = [
     {
