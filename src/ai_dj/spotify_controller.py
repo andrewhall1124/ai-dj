@@ -6,7 +6,7 @@ import os
 import spotipy
 from spotipy.oauth2 import SpotifyOAuth
 
-from config import SPOTIFY_SCOPES
+from ai_dj.config import SPOTIFY_SCOPES
 
 
 class SpotifyController:
@@ -18,6 +18,10 @@ class SpotifyController:
             scope=SPOTIFY_SCOPES,
             cache_path=".spotify_cache"
         ))
+
+        print(
+            
+        )
         self.device_id = None
 
     def ensure_active_device(self) -> str:

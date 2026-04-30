@@ -16,10 +16,9 @@ import sys
 
 from anthropic import Anthropic
 
-import config  # noqa: F401  — side effects: load_dotenv, silence spotipy logger
-from agent import run_agent_turn
-from src.core.spotify_controller import SpotifyController
-from voice import DJVoice
+from ai_dj.agent import run_agent_turn
+from ai_dj.spotify_controller import SpotifyController
+from ai_dj.voice import DJVoice
 
 
 def main():

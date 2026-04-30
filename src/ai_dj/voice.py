@@ -5,7 +5,7 @@ import os
 from elevenlabs import ElevenLabs
 from elevenlabs.play import play
 
-from config import ELEVENLABS_VOICE
+from ai_dj.config import ELEVENLABS_VOICE
 
 
 class DJVoice:

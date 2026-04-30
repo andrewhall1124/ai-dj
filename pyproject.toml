@@ -25,3 +25,4 @@ package = true
 
 [project.scripts]
 ai-dj-server = "server.main:main"
+ai-dj = "client.main:main"
