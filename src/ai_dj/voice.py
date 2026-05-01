@@ -22,8 +22,8 @@ class DJVoice:
             audio = self.client.text_to_speech.convert(
                 voice_id=self.voice_id,
                 text=text,
-                model_id="eleven_turbo_v2_5",
-                voice_settings={'speed': 1.2}
+                model_id="eleven_v3",
+                voice_settings={'speed': 1.1}
             )
             play(audio)
         except Exception as e:

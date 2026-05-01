@@ -73,25 +73,8 @@ def main():
         messages.append({"role": "user", "content": user_input})
 
         print()
-        dj_response, pending_action, pending_clear = run_agent_turn(claude, spotify, messages)
+        dj_response = run_agent_turn(claude, spotify, voice, messages)
         print(f"DJ Claude: {dj_response}\n")
-
-        if voice.enabled and dj_response:
-            current = spotify.sp.current_playback()
-            was_playing = bool(current and current.get("is_playing"))
-            if was_playing:
-                spotify.pause()
-            voice.speak(dj_response)
-            if pending_clear:
-                spotify.clear_queue()
-            if pending_action:
-                action_type, uri = pending_action
-                if action_type == "play":
-                    spotify.play(track_uri=uri)
-                elif action_type == "skip":
-                    spotify.skip()
-            elif was_playing and not pending_clear:
-                spotify.play()  # resume whatever we paused
 
 
 if __name__ == "__main__":

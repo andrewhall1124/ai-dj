@@ -6,6 +6,7 @@ from anthropic import Anthropic
 
 from ai_dj.config import CLAUDE_MODEL, SYSTEM_PROMPT
 from ai_dj.spotify_controller import SpotifyController
+from ai_dj.voice import DJVoice
 
 TOOLS = [
     {
@@ -96,6 +97,20 @@ TOOLS = [
         }
     },
     {
+        "name": "speak",
+        "description": "Speak DJ commentary out loud via TTS. Pauses any current playback for the duration of the speech. Call this BEFORE play or add_to_queue so the music starts after you finish talking.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "text": {
+                    "type": "string",
+                    "description": "One sentence of DJ commentary to speak — pure gremlin energy."
+                }
+            },
+            "required": ["text"]
+        }
+    },
+    {
         "name": "volume",
         "description": "Set playback volume on the active device.",
         "input_schema": {
@@ -112,7 +127,12 @@ TOOLS = [
 ]
 
 
-def handle_tool_call(spotify: SpotifyController, tool_name: str, tool_input: dict) -> str:
+def handle_tool_call(
+    spotify: SpotifyController,
+    voice: DJVoice,
+    tool_name: str,
+    tool_input: dict,
+) -> str:
     """Execute a tool call and return the result as a string."""
     if tool_name == "search":
         return spotify.search(
@@ -132,27 +152,27 @@ def handle_tool_call(spotify: SpotifyController, tool_name: str, tool_input: dic
         return spotify.currently_playing()
     elif tool_name == "pause":
         return spotify.pause()
+    elif tool_name == "speak":
+        text = tool_input["text"]
+        playback = spotify.sp.current_playback()
+        if playback and playback.get("is_playing"):
+            spotify.pause()
+        if voice.enabled:
+            voice.speak(text)
+        return json.dumps({"status": "spoke", "text": text})
     elif tool_name == "volume":
         return spotify.volume(volume_percent=tool_input["volume_percent"])
     else:
         return json.dumps({"error": f"Unknown tool: {tool_name}"})
 
 
-def run_agent_turn(client: Anthropic, spotify: SpotifyController, messages: list) -> tuple[str, tuple | None, bool]:
-    """
-    Run one full agent turn: call Claude, handle any tool use in a loop,
-    and return (final_text, pending_action, pending_clear).
-
-    play, skip, and clear_queue are NOT executed immediately — they are deferred
-    so the caller can fire them after TTS finishes. When clear_queue is deferred
-    alongside play/skip, the caller runs clear_queue first.
-
-    pending_action is ("play", uri_or_None) | ("skip", None) | None.
-    pending_clear is True if clear_queue was requested this turn.
-    """
-    pending_action = None
-    pending_clear = False
-
+def run_agent_turn(
+    client: Anthropic,
+    spotify: SpotifyController,
+    voice: DJVoice,
+    messages: list,
+) -> str:
+    """Run one full agent turn: call Claude, handle any tool use in a loop, return final text."""
     while True:
         response = client.messages.create(
             model=CLAUDE_MODEL,
@@ -162,7 +182,6 @@ def run_agent_turn(client: Anthropic, spotify: SpotifyController, messages: list
             messages=messages,
         )
 
-        # Collect text blocks and tool use blocks from the response
         text_parts = []
         tool_uses = []
 
@@ -172,28 +191,13 @@ def run_agent_turn(client: Anthropic, spotify: SpotifyController, messages: list
             elif block.type == "tool_use":
                 tool_uses.append(block)
 
-        # If there are tool calls, execute them and continue the loop
         if response.stop_reason == "tool_use":
-            # Append the full assistant message (with tool_use blocks)
             messages.append({"role": "assistant", "content": response.content})
 
-            # Execute each tool and collect results
             tool_results = []
             for tool_use in tool_uses:
                 print(f"  🔧 {tool_use.name}({json.dumps(tool_use.input, indent=None)[:80]}...)")
-                # Defer playback-mutating calls so music doesn't start before TTS
-                if tool_use.name == "play":
-                    uri = tool_use.input.get("track_uri")
-                    pending_action = ("play", uri)
-                    result = json.dumps({"status": "playing" if uri else "resumed", "track_uri": uri})
-                elif tool_use.name == "skip":
-                    pending_action = ("skip", None)
-                    result = json.dumps({"status": "skipped"})
-                elif tool_use.name == "clear_queue":
-                    pending_clear = True
-                    result = json.dumps({"status": "queue_cleared"})
-                else:
-                    result = handle_tool_call(spotify, tool_use.name, tool_use.input)
+                result = handle_tool_call(spotify, voice, tool_use.name, tool_use.input)
                 tool_results.append({
                     "type": "tool_result",
                     "tool_use_id": tool_use.id,
@@ -201,9 +205,8 @@ def run_agent_turn(client: Anthropic, spotify: SpotifyController, messages: list
                 })
 
             messages.append({"role": "user", "content": tool_results})
-            continue  # Loop back for Claude to process tool results
+            continue
 
         else:
-            # End turn — append final assistant message
             messages.append({"role": "assistant", "content": response.content})
-            return "\n".join(text_parts), pending_action, pending_clear
+            return "\n".join(text_parts)
