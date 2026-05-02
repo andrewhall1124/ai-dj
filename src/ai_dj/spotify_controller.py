@@ -70,6 +70,7 @@ class SpotifyController:
     def play(self, track_uri: str = None) -> str:
         try:
             self.ensure_active_device()
+            self.clear_queue()
             if track_uri:
                 self.sp.start_playback(device_id=self.device_id, uris=[track_uri])
                 return json.dumps({"status": "playing", "track_uri": track_uri})

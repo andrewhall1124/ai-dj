@@ -98,13 +98,13 @@ TOOLS = [
     },
     {
         "name": "speak",
-        "description": "Speak DJ commentary out loud via TTS. Pauses any current playback for the duration of the speech. Call this BEFORE play or add_to_queue so the music starts after you finish talking.",
+        "description": "Deliver one sentence of DJ commentary before queuing music. Pauses current playback while speaking; call this BEFORE play or add_to_queue.",
         "input_schema": {
             "type": "object",
             "properties": {
                 "text": {
                     "type": "string",
-                    "description": "One sentence of DJ commentary to speak — pure gremlin energy."
+                    "description": "One sentence of DJ commentary — pure gremlin energy."
                 }
             },
             "required": ["text"]
@@ -132,6 +132,7 @@ def handle_tool_call(
     voice: DJVoice,
     tool_name: str,
     tool_input: dict,
+    voice_enabled: bool = True,
 ) -> str:
     """Execute a tool call and return the result as a string."""
     if tool_name == "search":
@@ -157,7 +158,7 @@ def handle_tool_call(
         playback = spotify.sp.current_playback()
         if playback and playback.get("is_playing"):
             spotify.pause()
-        if voice.enabled:
+        if voice_enabled and voice.enabled:
             voice.speak(text)
         return json.dumps({"status": "spoke", "text": text})
     elif tool_name == "volume":
@@ -171,8 +172,15 @@ def run_agent_turn(
     spotify: SpotifyController,
     voice: DJVoice,
     messages: list,
-) -> str:
-    """Run one full agent turn: call Claude, handle any tool use in a loop, return final text."""
+    voice_enabled: bool = True,
+) -> tuple[str, str]:
+    """Run one full agent turn and return (reply, commentary).
+
+    commentary is the concatenated text from all speak tool calls this turn.
+    reply is the agent's final text response.
+    """
+    commentaries: list[str] = []
+
     while True:
         response = client.messages.create(
             model=CLAUDE_MODEL,
@@ -197,16 +205,22 @@ def run_agent_turn(
             tool_results = []
             for tool_use in tool_uses:
                 print(f"  🔧 {tool_use.name}({json.dumps(tool_use.input, indent=None)[:80]}...)")
-                result = handle_tool_call(spotify, voice, tool_use.name, tool_use.input)
+                result = handle_tool_call(
+                    spotify, voice, tool_use.name, tool_use.input, voice_enabled
+                )
                 tool_results.append({
                     "type": "tool_result",
                     "tool_use_id": tool_use.id,
                     "content": result
                 })
+                if tool_use.name == "speak":
+                    commentaries.append(tool_use.input["text"])
 
             messages.append({"role": "user", "content": tool_results})
             continue
 
         else:
             messages.append({"role": "assistant", "content": response.content})
-            return "\n".join(text_parts)
+            reply = "\n".join(text_parts)
+            commentary = " ".join(commentaries)
+            return reply, commentary

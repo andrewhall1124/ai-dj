@@ -1,24 +1,38 @@
 """
-AI DJ — A terminal-based conversational DJ powered by Claude, Spotify, and ElevenLabs.
+AI DJ TUI — terminal client for the DJ Claude server.
 
 Usage:
-    1. Copy .env.example to .env and fill in your API keys
-    2. pip install anthropic spotipy elevenlabs python-dotenv
-    3. python main.py
-
-You talk to the DJ via text. The DJ:
-  - Picks and queues songs on Spotify
-  - Gives spoken DJ commentary via ElevenLabs
-  - Remembers context across the conversation
+    1. Start the server: uv run server
+    2. python -m tui.main
 """
 
 import sys
 
-from anthropic import Anthropic
+import httpx
 
-from ai_dj.agent import run_agent_turn
-from ai_dj.spotify_controller import SpotifyController
-from ai_dj.voice import DJVoice
+SERVER_URL = "http://localhost:8000"
+
+
+def check_server(client: httpx.Client) -> dict:
+    try:
+        r = client.get(f"{SERVER_URL}/status", timeout=5)
+        r.raise_for_status()
+        return r.json()
+    except httpx.ConnectError:
+        print(f"  ❌ Could not connect to server at {SERVER_URL}")
+        print("  Make sure the server is running: uv run server")
+        sys.exit(1)
+
+
+def send_message(client: httpx.Client, message: str) -> tuple[str, str | None]:
+    r = client.post(
+        f"{SERVER_URL}/chat",
+        json={"message": message, "voice": True},
+        timeout=120,
+    )
+    r.raise_for_status()
+    data = r.json()
+    return data["reply"], data.get("commentary")
 
 
 def main():
@@ -27,54 +41,42 @@ def main():
     print("  Your AI-powered personal radio DJ")
     print("=" * 60)
 
-    # ── Init clients ──
-    claude = Anthropic()
+    with httpx.Client() as client:
+        print("\n  Connecting to server...")
+        status = check_server(client)
+        track = status.get("item", {})
+        if track:
+            artists = ", ".join(a["name"] for a in track.get("artists", []))
+            print(f"  ✅ Server ready — now playing: {track['name']} by {artists}")
+        else:
+            print("  ✅ Server ready")
 
-    print("\n  Connecting to Spotify...")
-    try:
-        spotify = SpotifyController()
-        user = spotify.sp.current_user()
-        print(f"  ✅ Logged in as {user['display_name']}")
-        device_id = spotify.ensure_active_device()
-        device_name = next(
-            (d["name"] for d in spotify.sp.devices()["devices"] if d["id"] == device_id),
-            device_id,
-        )
-        print(f"  ✅ Active device: {device_name}")
-    except Exception as e:
-        print(f"  ❌ Spotify connection failed: {e}")
-        print("  Make sure your .env has SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET, and SPOTIFY_REDIRECT_URI")
-        print("  And open Spotify on at least one device (phone, desktop, or web player).")
-        sys.exit(1)
+        print("\n  Type your requests, or 'quit' to exit.\n")
 
-    voice = DJVoice()
-    if voice.enabled:
-        print("  ✅ ElevenLabs TTS enabled")
-    else:
-        print("  ⚠️  No ELEVENLABS_API_KEY — running text-only (no voice)")
+        while True:
+            try:
+                user_input = input("You: ").strip()
+            except (EOFError, KeyboardInterrupt):
+                print("\n\n  👋 DJ Claude signing off. Stay groovy.")
+                break
 
-    print("\n  Type your requests, or 'quit' to exit.\n")
+            if not user_input:
+                continue
+            if user_input.lower() in ("quit", "exit", "q"):
+                print("\n  👋 DJ Claude signing off. Stay groovy.")
+                break
 
-    messages = []
+            print()
+            try:
+                reply, _ = send_message(client, user_input)
+            except httpx.HTTPStatusError as e:
+                print(f"  ❌ Server error: {e.response.status_code}\n")
+                continue
+            except httpx.RequestError as e:
+                print(f"  ❌ Request failed: {e}\n")
+                continue
 
-    while True:
-        try:
-            user_input = input("You: ").strip()
-        except (EOFError, KeyboardInterrupt):
-            print("\n\n  👋 DJ Claude signing off. Stay groovy.")
-            break
-
-        if not user_input:
-            continue
-        if user_input.lower() in ("quit", "exit", "q"):
-            print("\n  👋 DJ Claude signing off. Stay groovy.")
-            break
-
-        messages.append({"role": "user", "content": user_input})
-
-        print()
-        dj_response = run_agent_turn(claude, spotify, voice, messages)
-        print(f"DJ Claude: {dj_response}\n")
+            print(f"DJ Claude: {reply}\n")
 
 
 if __name__ == "__main__":
