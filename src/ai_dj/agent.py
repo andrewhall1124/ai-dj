@@ -124,6 +124,43 @@ TOOLS = [
             "required": ["volume_percent"]
         }
     },
+    {
+        "name": "list_devices",
+        "description": "List all available Spotify devices and which one is currently selected.",
+        "input_schema": {
+            "type": "object",
+            "properties": {},
+            "required": []
+        }
+    },
+    {
+        "name": "select_device",
+        "description": "Select which Spotify device to play music on.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "device_id": {
+                    "type": "string",
+                    "description": "The Spotify device ID to use for playback."
+                }
+            },
+            "required": ["device_id"]
+        }
+    },
+    {
+        "name": "ask_user",
+        "description": "Ask the user a question and wait for their reply before continuing. Use when you need information to proceed, e.g. which Spotify device to play on. Call list_devices first, then ask_user with the options listed. Do NOT guess or auto-select.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "question": {
+                    "type": "string",
+                    "description": "The question to ask the user."
+                }
+            },
+            "required": ["question"]
+        }
+    },
 ]
 
 
@@ -163,6 +200,10 @@ def handle_tool_call(
         return json.dumps({"status": "spoke", "text": text})
     elif tool_name == "volume":
         return spotify.volume(volume_percent=tool_input["volume_percent"])
+    elif tool_name == "list_devices":
+        return spotify.list_devices()
+    elif tool_name == "select_device":
+        return spotify.select_device(device_id=tool_input["device_id"])
     else:
         return json.dumps({"error": f"Unknown tool: {tool_name}"})
 
@@ -173,11 +214,12 @@ def run_agent_turn(
     voice: DJVoice,
     messages: list,
     voice_enabled: bool = True,
-) -> tuple[str, str]:
-    """Run one full agent turn and return (reply, commentary).
+) -> tuple[str, str, str | None, str | None]:
+    """Run one full agent turn and return (reply, commentary, question, pending_tool_use_id).
 
-    commentary is the concatenated text from all speak tool calls this turn.
-    reply is the agent's final text response.
+    If the agent calls ask_user, the turn pauses: question and pending_tool_use_id are
+    non-None, and the caller must inject the user's answer as a tool result before the
+    next turn.
     """
     commentaries: list[str] = []
 
@@ -202,6 +244,12 @@ def run_agent_turn(
         if response.stop_reason == "tool_use":
             messages.append({"role": "assistant", "content": response.content})
 
+            ask_user_call = next((t for t in tool_uses if t.name == "ask_user"), None)
+            if ask_user_call:
+                question = ask_user_call.input["question"]
+                print(f"  🔧 ask_user({question[:80]}...)")
+                return "", " ".join(commentaries), question, ask_user_call.id
+
             tool_results = []
             for tool_use in tool_uses:
                 print(f"  🔧 {tool_use.name}({json.dumps(tool_use.input, indent=None)[:80]}...)")
@@ -223,4 +271,4 @@ def run_agent_turn(
             messages.append({"role": "assistant", "content": response.content})
             reply = "\n".join(text_parts)
             commentary = " ".join(commentaries)
-            return reply, commentary
+            return reply, commentary, None, None

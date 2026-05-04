@@ -24,14 +24,33 @@ class SpotifyController:
         )
         self.device_id = None
 
-    def ensure_active_device(self) -> str:
-        """Find an active Spotify device, waking one up if needed. Returns the device id."""
+    def ensure_active_device(self) -> None:
+        """Verify at least one Spotify device is available. Device selection is handled by the agent."""
+        if self.device_id:
+            return
         devices = self.sp.devices().get("devices", [])
-        if not devices or len(devices) == 0:
+        if not devices:
             raise RuntimeError(
                 "No Spotify devices found. Open Spotify on a phone, desktop, or web player first."
             )
-        self.device_id = devices[0]['id']
+
+    def list_devices(self) -> str:
+        devices = self.sp.devices().get("devices", [])
+        return json.dumps({
+            "devices": [
+                {"id": d["id"], "name": d["name"], "type": d["type"], "is_active": d.get("is_active", False)}
+                for d in devices
+            ],
+            "selected_device_id": self.device_id,
+        })
+
+    def select_device(self, device_id: str) -> str:
+        devices = self.sp.devices().get("devices", [])
+        match = next((d for d in devices if d["id"] == device_id), None)
+        if not match:
+            return json.dumps({"error": f"Device '{device_id}' not found. Call list_devices to get current options."})
+        self.device_id = device_id
+        return json.dumps({"status": "device_selected", "name": match["name"], "type": match["type"]})
 
     def search(self, query: str, search_type: str = "track", limit: int = 5) -> str:
         results = self.sp.search(q=query, type=search_type, limit=limit)
